@@ -1,8 +1,7 @@
-const { getMovieDetails, fetchExternalSubtitles } = require('./utils/tmdb');
+const { getMovieDetails } = require('./utils/tmdb');
 const { SourceFetcher, SERVERS } = require('./utils/sources');
 
 module.exports = async (req, res) => {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -12,11 +11,7 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { id, server = 'lamda', proxy } = req.query;
+  const { id, server = 'lamda', debug = 'true' } = req.query;
 
   if (!id) {
     return res.status(400).json({
@@ -34,55 +29,25 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Fetch metadata and video data in parallel
-    const [metadata, videoData] = await Promise.all([
-      getMovieDetails(id),
-      new SourceFetcher(serverKey, id, 'movie').fetch().catch(err => ({ error: err.message }))
-    ]);
-
-    if (videoData.error) {
-      return res.status(404).json({
-        success: false,
-        error: videoData.error,
-        server: serverKey,
-        tmdbId: id
-      });
-    }
-
-    // Try to fetch external subtitles
-    let subtitles = videoData.subtitles || [];
-    try {
-      const externalSubs = await fetchExternalSubtitles(id, 'movie');
-      subtitles = [...subtitles, ...externalSubs];
-    } catch (e) {
-      // Ignore subtitle fetch errors
-    }
-
+    const fetcher = new SourceFetcher(serverKey, id, 'movie');
+    const result = await fetcher.fetch();
+    
+    // Try to extract any URLs from the raw response
+    const extractedUrls = extractUrls(result.raw);
+    
     const response = {
       success: true,
       server: serverKey,
       tmdbId: id,
-      title: metadata?.title || `Movie ${id}`,
-      poster: metadata?.poster,
-      backdrop: metadata?.backdrop,
-      year: metadata?.year,
-      overview: metadata?.overview,
-      sources: videoData.sources.map(s => ({
-        url: s.url,
-        quality: s.quality,
-        type: s.type || 'mp4',
-        ...(proxy === 'false' && { direct: true })
-      })),
-      subtitles: subtitles.map(s => ({
-        url: s.url,
-        lang: s.lang || 'en',
-        label: s.label || 'Unknown',
-        default: s.default || false
-      })),
-      headers: {
-        Referer: "https://videostr.net/",
-        Origin: "https://videostr.net"
-      }
+      endpoint: result.endpoint,
+      contentType: result.contentType,
+      isJson: result.isJson,
+      hint: result.hint,
+      responseLength: result.raw.length,
+      raw: debug === 'true' ? result.raw.substring(0, 5000) : '[hidden - set debug=false to hide]',
+      parsed: result.parsed,
+      extractedUrls: extractedUrls,
+      timestamp: new Date().toISOString()
     };
 
     return res.status(200).json(response);
@@ -91,9 +56,31 @@ module.exports = async (req, res) => {
     console.error('Movie API Error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error',
+      error: error.message,
       server: serverKey,
-      tmdbId: id
+      tmdbId: id,
+      stack: debug === 'true' ? error.stack : undefined
     });
   }
 };
+
+function extractUrls(text) {
+  if (!text) return [];
+  
+  const urlRegex = /(https?:\/\/[^\s"'<>]+)/g;
+  const matches = text.match(urlRegex) || [];
+  
+  // Also look for URL-encoded URLs
+  const decodedMatches = matches.map(url => {
+    try {
+      if (url.includes('%')) {
+        return decodeURIComponent(url);
+      }
+      return url;
+    } catch (e) {
+      return url;
+    }
+  });
+  
+  return [...new Set(decodedMatches)].slice(0, 10); // Unique, max 10
+}
