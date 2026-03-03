@@ -30,25 +30,17 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Fetch video data first to get decrypted response
     const fetcher = new SourceFetcher(serverKey, id, 'tv', season, episode, useProxy);
     const videoData = await fetcher.fetch();
 
-    // If decryption/processing failed
     if (!videoData.success) {
       return res.status(404).json({
-        decryptedResponse: videoData.rawData || videoData.decrypted || null,
+        decryptedResponse: videoData.rawData || null,
         success: false,
-        error: videoData.error || "Failed to fetch video",
-        server: serverKey,
-        tmdbId: id,
-        season: parseInt(season),
-        episode: parseInt(episode),
-        details: videoData
+        error: videoData.error || "Failed to fetch video"
       });
     }
 
-    // Get metadata separately (don't block if it fails)
     let metadata = null;
     try {
       metadata = await getTvDetails(id, season, episode);
@@ -56,16 +48,8 @@ module.exports = async (req, res) => {
       console.log('Metadata fetch failed:', e.message);
     }
 
-    // Build response with decrypted data FIRST
     const response = {
-      // 1. Full decrypted response from the server
       decryptedResponse: videoData.rawData || null,
-      
-      // 2. Processed video sources
-      sources: videoData.sources || [],
-      subtitles: videoData.subtitles || [],
-      
-      // 3. Metadata
       success: true,
       server: serverKey,
       tmdbId: id,
@@ -75,11 +59,8 @@ module.exports = async (req, res) => {
       showName: metadata?.showName,
       episodeName: metadata?.episodeName,
       poster: metadata?.poster,
-      backdrop: metadata?.backdrop,
-      
-      // 4. Other info
-      proxyUsed: useProxy,
-      note: "Use ?proxy=false to get direct URLs"
+      sources: videoData.sources || [],
+      subtitles: videoData.subtitles || []
     };
 
     return res.status(200).json(response);
