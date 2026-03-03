@@ -56,9 +56,7 @@ module.exports = async (req, res) => {
       title: metadata?.title || `Movie ${id}`,
       poster: metadata?.poster,
       backdrop: metadata?.backdrop,
-      year: metadata?.year,
-      sources: videoData.sources || [],
-      subtitles: videoData.subtitles || []
+      year: metadata?.year
     };
 
     return res.status(200).json(response);
