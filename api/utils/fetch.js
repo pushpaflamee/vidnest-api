@@ -1,14 +1,5 @@
 const fetch = require('node-fetch');
 
-// Better CORS proxies that don't double-encode
-const CORS_PROXIES = [
-  "https://api.allorigins.win/raw?url=",
-  "https://api.codetabs.com/v1/proxy?quest=",
-  "https://corsproxy.io/?"  // Keep as fallback
-];
-
-const PRIMARY_PROXY = "https://api.allorigins.win/raw?url=";
-
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -34,32 +25,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
-// Don't double-encode URLs
-function createProxyUrl(targetUrl, headers = {}) {
-  // allorigins doesn't need headers in URL, it forwards them automatically
-  return `${PRIMARY_PROXY}${encodeURIComponent(targetUrl)}`;
-}
-
-function createM3U8ProxyUrl(targetUrl, headers = {}) {
-  // For M3U8, use a proxy that handles HLS properly
-  return `https://m3u8proxy-cors.vercel.app/?url=${encodeURIComponent(targetUrl)}`;
-}
-
-function createMP4ProxyUrl(targetUrl, headers = {}) {
-  // For MP4 files
-  return `${PRIMARY_PROXY}${encodeURIComponent(targetUrl)}`;
-}
-
-// Direct URL without proxy (for testing)
-function createDirectUrl(targetUrl) {
-  return targetUrl;
-}
-
 module.exports = {
-  fetchWithTimeout,
-  createProxyUrl,
-  createM3U8ProxyUrl,
-  createMP4ProxyUrl,
-  createDirectUrl,
-  PRIMARY_PROXY
+  fetchWithTimeout
 };
