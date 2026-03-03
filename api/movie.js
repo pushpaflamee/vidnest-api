@@ -11,8 +11,7 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  const { id, server = 'lamda', proxy = 'true' } = req.query;
-  const useProxy = proxy !== 'false';
+  const { id, server = 'lamda' } = req.query;
 
   if (!id) {
     return res.status(400).json({
@@ -30,12 +29,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const fetcher = new SourceFetcher(serverKey, id, 'movie', null, null, useProxy);
+    const fetcher = new SourceFetcher(serverKey, id, 'movie');
     const videoData = await fetcher.fetch();
 
     if (!videoData.success) {
       return res.status(404).json({
-        decryptedResponse: videoData.rawData || null,
         success: false,
         error: videoData.error || "Failed to fetch video"
       });
@@ -49,7 +47,13 @@ module.exports = async (req, res) => {
     }
 
     const response = {
-      decryptedResponse: videoData.rawData || null,
+      // 1. URLs (sources)
+      sources: videoData.sources || [],
+      
+      // 2. Subtitles
+      subtitles: videoData.subtitles || [],
+      
+      // 3. Metadata only
       success: true,
       server: serverKey,
       tmdbId: id,
@@ -64,11 +68,8 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('Movie API Error:', error);
     return res.status(500).json({
-      decryptedResponse: null,
       success: false,
-      error: error.message,
-      server: serverKey,
-      tmdbId: id
+      error: error.message
     });
   }
 };
