@@ -4,7 +4,7 @@ A serverless API that scrapes streaming sources from multiple providers and retu
 
 ## Deploy to Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/streaming-api)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/pushpaflamee/vidnest-api)
 
 ## Environment Variables
 
