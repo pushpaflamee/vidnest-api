@@ -89,7 +89,6 @@ class SourceFetcher {
 
       const rawText = await response.text();
       
-      // Try to parse as JSON
       let jsonData = null;
       try {
         jsonData = JSON.parse(rawText);
@@ -97,7 +96,6 @@ class SourceFetcher {
         // Not valid JSON
       }
 
-      // Decrypt if needed
       let decrypted = null;
       let wasEncrypted = false;
       
@@ -109,7 +107,7 @@ class SourceFetcher {
           return {
             success: false,
             error: "Decryption failed",
-            rawPreview: rawText.substring(0, 500),
+            rawData: jsonData,
             wasEncrypted: true
           };
         }
@@ -123,7 +121,7 @@ class SourceFetcher {
         return {
           success: false,
           error: "Failed to parse/decrypt response",
-          rawPreview: rawText.substring(0, 500)
+          rawData: { rawText: rawText.substring(0, 1000) }
         };
       }
 
@@ -138,7 +136,6 @@ class SourceFetcher {
   getEndpoint() {
     const base = this.type === 'movie' ? this.server.movieUrl : this.server.tvUrl;
     
-    // Sigma has different path structure
     if (this.serverKey === 'sigma') {
       if (this.type === 'movie') {
         return `${base}/movie/${this.tmdbId}`;
@@ -147,7 +144,6 @@ class SourceFetcher {
       }
     }
     
-    // Standard structure
     if (this.type === 'movie') {
       if (this.serverKey === 'beta') {
         return `${base}/${this.tmdbId}?server=upcloud`;
@@ -155,7 +151,6 @@ class SourceFetcher {
       return `${base}/${this.tmdbId}`;
     }
     
-    // TV structure
     if (this.serverKey === 'beta') {
       return `${base}/${this.tmdbId}/${this.season}/${this.episode}?server=upcloud`;
     }
@@ -165,32 +160,44 @@ class SourceFetcher {
   processData(data) {
     console.log(`[${this.serverKey}] Processing data with keys:`, Object.keys(data));
 
+    let result;
+    
     switch (this.server.type) {
       case 'lamda':
-        return this.processLamda(data);
+        result = this.processLamda(data);
+        break;
       case 'ophim':
-        return this.processOphim(data);
+        result = this.processOphim(data);
+        break;
       case 'gama':
       case 'beta':
-        return this.processFlixHQ(data);
+        result = this.processFlixHQ(data);
+        break;
       case 'catflix':
-        return this.processCatflix(data);
+        result = this.processCatflix(data);
+        break;
       case 'sigma':
-        return this.processSigma(data);
+        result = this.processSigma(data);
+        break;
       case 'hexa':
-        return this.processHexa(data);
+        result = this.processHexa(data);
+        break;
       case 'delta':
-        return this.processDelta(data);
+        result = this.processDelta(data);
+        break;
       case 'alfa':
-        return this.processAlfa(data);
+        result = this.processAlfa(data);
+        break;
       default:
-        return {
+        result = {
           success: true,
           sources: [],
-          subtitles: [],
-          rawData: data
+          subtitles: []
         };
     }
+
+    result.rawData = data;
+    return result;
   }
 
   processLamda(data) {
@@ -203,7 +210,8 @@ class SourceFetcher {
       return { 
         success: false, 
         error: "No stream URL found",
-        availableStreams: streams.length
+        availableStreams: streams.length,
+        rawData: data
       };
     }
 
@@ -213,15 +221,20 @@ class SourceFetcher {
         url: this.useProxy ? createProxyUrl(englishStream.url) : englishStream.url,
         quality: englishStream.quality || 'English',
         type: this.detectStreamType(englishStream.url),
-        directUrl: englishStream.url // Include direct URL for testing
+        directUrl: englishStream.url
       }],
-      subtitles: []
+      subtitles: [],
+      rawData: data
     };
   }
 
   processOphim(data) {
     if (!data.streams || !Array.isArray(data.streams)) {
-      return { success: false, error: "No streams array" };
+      return { 
+        success: false, 
+        error: "No streams array",
+        rawData: data
+      };
     }
 
     return {
@@ -232,13 +245,18 @@ class SourceFetcher {
         type: this.detectStreamType(s.url),
         directUrl: s.url
       })),
-      subtitles: []
+      subtitles: [],
+      rawData: data
     };
   }
 
   processFlixHQ(data) {
     if (!data.url) {
-      return { success: false, error: "No URL in response" };
+      return { 
+        success: false, 
+        error: "No URL in response",
+        rawData: data
+      };
     }
 
     const subtitles = (data.subtitles || []).map(s => ({
@@ -249,7 +267,7 @@ class SourceFetcher {
     }));
 
     const directUrl = data.url;
-    const proxiedUrl = createProxyUrl(data.url);
+    const proxiedUrl = createProxyUrl(data.url, { Referer: "https://videostr.net/" });
 
     return {
       success: true,
@@ -260,19 +278,24 @@ class SourceFetcher {
         directUrl: directUrl,
         proxiedUrl: proxiedUrl
       }],
-      subtitles
+      subtitles: subtitles,
+      rawData: data
     };
   }
 
   processCatflix(data) {
     if (!data.url || !Array.isArray(data.url)) {
-      return { success: false, error: "Invalid Catflix URL format" };
+      return { 
+        success: false, 
+        error: "Invalid Catflix URL format",
+        rawData: data
+      };
     }
 
     const sources = data.url.map(u => {
       const directUrl = u.link;
       return {
-        url: this.useProxy ? createMP4ProxyUrl(directUrl) : directUrl,
+        url: this.useProxy ? createMP4ProxyUrl(directUrl, data.headers || {}) : directUrl,
         quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
         type: u.type || 'mp4',
         directUrl: directUrl
@@ -286,7 +309,12 @@ class SourceFetcher {
       default: false
     }));
 
-    return { success: true, sources, subtitles };
+    return { 
+      success: true, 
+      sources: sources, 
+      subtitles: subtitles,
+      rawData: data
+    };
   }
 
   processSigma(data) {
@@ -294,24 +322,26 @@ class SourceFetcher {
       return { 
         success: false, 
         error: "Invalid Sigma response", 
-        keys: Object.keys(data),
         hasSuccess: data.success,
-        sourcesType: typeof data.sources
+        sourcesType: typeof data.sources,
+        rawData: data
       };
     }
 
     const hlsSources = data.sources.filter(s => s.type === 'hls' && s.file);
     if (!hlsSources.length) {
-      return { success: false, error: "No HLS sources", totalSources: data.sources.length };
+      return { 
+        success: false, 
+        error: "No HLS sources", 
+        totalSources: data.sources.length,
+        rawData: data
+      };
     }
 
-    // Pick best quality (usually index 2 if available, else last)
     const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
     
     const directUrl = selected.file;
-    
-    // Sigma needs specific headers
-    const headerString = encodeURIComponent(JSON.stringify({
+    const proxiedUrl = createProxyUrl(directUrl, {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
       "accept": "*/*",
       "accept-language": "en-US,en;q=0.5",
@@ -320,10 +350,7 @@ class SourceFetcher {
       "sec-fetch-site": "cross-site",
       "origin": "https://flashstream.cc",
       "referer": "https://flashstream.cc/"
-    }));
-
-    // Use a proxy that supports custom headers
-    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
+    });
 
     return {
       success: true,
@@ -338,13 +365,18 @@ class SourceFetcher {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0"
         }
       }],
-      subtitles: []
+      subtitles: [],
+      rawData: data
     };
   }
 
   processHexa(data) {
     if (!data.data?.stream?.playlist) {
-      return { success: false, error: "No playlist in Hexa data" };
+      return { 
+        success: false, 
+        error: "No playlist in Hexa data",
+        rawData: data
+      };
     }
 
     const stream = data.data.stream;
@@ -360,7 +392,7 @@ class SourceFetcher {
       }));
 
     const directUrl = cleanUrl(stream.playlist);
-    const proxiedUrl = createM3U8ProxyUrl(directUrl);
+    const proxiedUrl = createM3U8ProxyUrl(directUrl, headers);
 
     return {
       success: true,
@@ -370,7 +402,8 @@ class SourceFetcher {
         type: 'hls',
         directUrl: directUrl
       }],
-      subtitles
+      subtitles: subtitles,
+      rawData: data
     };
   }
 
@@ -384,7 +417,8 @@ class SourceFetcher {
       return { 
         success: false, 
         error: "Hindi stream not available",
-        availableLanguages: streams.map(s => s.language)
+        availableLanguages: streams.map(s => s.language),
+        rawData: data
       };
     }
 
@@ -396,13 +430,18 @@ class SourceFetcher {
         type: this.detectStreamType(hindiStream.url),
         directUrl: hindiStream.url
       }],
-      subtitles: []
+      subtitles: [],
+      rawData: data
     };
   }
 
   processAlfa(data) {
     if (!data.sources || !Array.isArray(data.sources)) {
-      return { success: false, error: "No sources in Alfa response" };
+      return { 
+        success: false, 
+        error: "No sources in Alfa response",
+        rawData: data
+      };
     }
 
     const validSources = data.sources.filter(s => {
@@ -412,7 +451,12 @@ class SourceFetcher {
     });
 
     if (!validSources.length) {
-      return { success: false, error: "No valid sources found" };
+      return { 
+        success: false, 
+        error: "No valid sources found", 
+        totalSources: data.sources.length,
+        rawData: data
+      };
     }
 
     const sources = validSources.map(s => {
@@ -420,14 +464,19 @@ class SourceFetcher {
       const isM3U8 = !s.url.includes('.txt') && (s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/'));
       
       return {
-        url: this.useProxy ? `https://corsproxy.io/?${encodeURIComponent(directUrl)}` : directUrl,
+        url: this.useProxy ? createProxyUrl(directUrl, { Referer: "https://primevid.click/" }) : directUrl,
         quality: s.quality || 'auto',
         type: isM3U8 ? 'hls' : 'mp4',
         directUrl: directUrl
       };
     });
 
-    return { success: true, sources, subtitles: [] };
+    return { 
+      success: true, 
+      sources: sources, 
+      subtitles: [],
+      rawData: data
+    };
   }
 
   detectStreamType(url) {
