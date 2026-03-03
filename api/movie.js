@@ -11,7 +11,8 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  const { id, server = 'lamda' } = req.query;
+  const { id, server = 'lamda', proxy = 'true' } = req.query;
+  const useProxy = proxy !== 'false';
 
   if (!id) {
     return res.status(400).json({
@@ -29,10 +30,9 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Fetch metadata and video in parallel
     const [metadata, videoData] = await Promise.all([
       getMovieDetails(id),
-      new SourceFetcher(serverKey, id, 'movie').fetch()
+      new SourceFetcher(serverKey, id, 'movie', null, null, useProxy).fetch()
     ]);
 
     if (!videoData.success) {
@@ -55,10 +55,8 @@ module.exports = async (req, res) => {
       year: metadata?.year,
       sources: videoData.sources || [],
       subtitles: videoData.subtitles || [],
-      headers: {
-        Referer: "https://videostr.net/",
-        Origin: "https://videostr.net"
-      }
+      proxyUsed: useProxy,
+      note: "Use ?proxy=false to get direct URLs (may have CORS issues)"
     };
 
     return res.status(200).json(response);
