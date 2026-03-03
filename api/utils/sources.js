@@ -1,90 +1,55 @@
 const { fetchWithTimeout } = require('./fetch');
-const { decryptCipherResponse, cleanHeaders, CIPHER_KEY_BASE64 } = require('./decrypt');
+const { decryptCipherResponse, CIPHER_KEY_BASE64 } = require('./decrypt');
 
 const BASE_URL = "https://new.vidnest.fun";
 
 const SERVERS = {
   lamda: {
     name: "Lamda",
-    type: "lamda"
+    type: "lamda",
+    referer: null // No referer needed
   },
   alfa: {
     name: "Alfa",
-    type: "alfa"
+    type: "alfa",
+    referer: "https://primevid.click/"
   },
   ophim: {
     name: "Ophim",
-    type: "ophim"
+    type: "ophim",
+    referer: null // No referer needed
   },
   beta: {
     name: "Beta",
-    type: "beta"
+    type: "beta",
+    referer: "https://videostr.net/"
   },
   sigma: {
     name: "Sigma",
-    type: "sigma"
+    type: "sigma",
+    referer: "https://flashstream.cc/"
   },
   gama: {
     name: "Gama",
-    type: "gama"
+    type: "gama",
+    referer: "https://videostr.net/"
   },
   catflix: {
     name: "Catflix",
-    type: "catflix"
+    type: "catflix",
+    referer: null // Headers passed per request
   },
   hexa: {
     name: "Hexa",
-    type: "hexa"
+    type: "hexa",
+    referer: null // Dynamic from response
   },
   delta: {
     name: "Delta",
-    type: "delta"
+    type: "delta",
+    referer: null // No referer needed
   }
 };
-
-// Proxy URL builders as per specifications
-function createAlfaProxy(targetUrl) {
-  const headers = encodeURIComponent(JSON.stringify({ "Referer": "https://primevid.click/" }));
-  return `https://proxy.animanga.fun/proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
-
-function createBetaProxy(targetUrl) {
-  const headers = encodeURIComponent(JSON.stringify({
-    "Referer": "https://videostr.net/",
-    "User-Agent": "Mozilla/5.0"
-  }));
-  return `https://proxy2.animanga.fun/proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
-
-function createSigmaProxy(targetUrl) {
-  const headers = encodeURIComponent(JSON.stringify({
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
-    "accept": "*/*",
-    "accept-language": "en-US,en;q=0.5",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "cross-site",
-    "origin": "https://flashstream.cc",
-    "referer": "https://flashstream.cc/"
-  }));
-  return `https://proxy.animanga.fun/proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
-
-function createGamaProxy(targetUrl) {
-  const headers = encodeURIComponent(JSON.stringify({ "Referer": "https://videostr.net/" }));
-  return `https://proxy.animanga.fun/proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
-
-function createCatflixProxy(targetUrl, headersObj = {}) {
-  const headers = encodeURIComponent(JSON.stringify(headersObj));
-  return `https://cloudflare-m3u8-proxy.animeexost.workers.dev/mp4-proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
-
-function createHexaProxy(targetUrl, headersObj = {}) {
-  const cleaned = cleanHeaders(headersObj);
-  const headers = encodeURIComponent(JSON.stringify(cleaned));
-  return `https://proxy2.animanga.fun/proxy?url=${encodeURIComponent(targetUrl)}&headers=${headers}`;
-}
 
 class SourceFetcher {
   constructor(serverKey, tmdbId, type = 'movie', season = null, episode = null) {
@@ -158,7 +123,6 @@ class SourceFetcher {
   getEndpoint() {
     switch (this.serverKey) {
       case 'lamda':
-        // {BASE}/allmovies/movie/{tmdbId} or {BASE}/allmovies/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/allmovies/movie/${this.tmdbId}`;
         } else {
@@ -166,7 +130,6 @@ class SourceFetcher {
         }
       
       case 'alfa':
-        // {BASE}/primesrc/movie/{tmdbId} or {BASE}/primesrc/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/primesrc/movie/${this.tmdbId}`;
         } else {
@@ -174,7 +137,6 @@ class SourceFetcher {
         }
       
       case 'ophim':
-        // {BASE}/ophim/movie/{tmdbId} or {BASE}/ophim/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/ophim/movie/${this.tmdbId}`;
         } else {
@@ -182,7 +144,6 @@ class SourceFetcher {
         }
       
       case 'beta':
-        // {BASE}/flixhq/movie/{tmdbId}?server=upcloud or {BASE}/flixhq/tv/{tmdbId}/{season}/{episode}?server=upcloud
         if (this.type === 'movie') {
           return `${BASE_URL}/flixhq/movie/${this.tmdbId}?server=upcloud`;
         } else {
@@ -190,7 +151,6 @@ class SourceFetcher {
         }
       
       case 'sigma':
-        // {BASE}/hollymoviehd/movie/{tmdbId} or {BASE}/hollymoviehd/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/hollymoviehd/movie/${this.tmdbId}`;
         } else {
@@ -198,7 +158,6 @@ class SourceFetcher {
         }
       
       case 'gama':
-        // {BASE}/flixhq/movie/{tmdbId} or {BASE}/flixhq/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/flixhq/movie/${this.tmdbId}`;
         } else {
@@ -206,7 +165,6 @@ class SourceFetcher {
         }
       
       case 'catflix':
-        // {BASE}/moviebox/movie/{tmdbId} or {BASE}/moviebox/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/moviebox/movie/${this.tmdbId}`;
         } else {
@@ -214,7 +172,6 @@ class SourceFetcher {
         }
       
       case 'hexa':
-        // {BASE}/vidlink/movie/{tmdbId} or {BASE}/vidlink/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/vidlink/movie/${this.tmdbId}`;
         } else {
@@ -222,7 +179,6 @@ class SourceFetcher {
         }
       
       case 'delta':
-        // {BASE}/allmovies/movie/{tmdbId} or {BASE}/allmovies/tv/{tmdbId}/{season}/{episode}
         if (this.type === 'movie') {
           return `${BASE_URL}/allmovies/movie/${this.tmdbId}`;
         } else {
@@ -278,7 +234,7 @@ class SourceFetcher {
     return result;
   }
 
-  // 1. LAMDA - No proxy, filters English
+  // 1. LAMDA - Direct URL, English filter, no referer
   processLamda(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
     const englishStream = streams.find(s => 
@@ -298,13 +254,14 @@ class SourceFetcher {
       sources: [{
         url: englishStream.url,
         quality: englishStream.quality || 'English',
-        type: this.detectStreamType(englishStream.url)
+        type: this.detectStreamType(englishStream.url),
+        referer: this.server.referer
       }],
       subtitles: []
     };
   }
 
-  // 2. ALFA - Proxy with primevid referer, filters M3U8/HLS
+  // 2. ALFA - Direct URL with referer
   processAlfa(data) {
     if (!data.sources || !Array.isArray(data.sources)) {
       return { 
@@ -326,7 +283,6 @@ class SourceFetcher {
       };
     }
 
-    // Sort: prioritize non-.txt files, then non-IP URLs
     const sortedSources = validSources.sort((a, b) => {
       const aTxt = a.url.includes('.txt');
       const bTxt = b.url.includes('.txt');
@@ -341,16 +297,12 @@ class SourceFetcher {
       return 0;
     });
 
-    const sources = sortedSources.map(s => {
-      const isM3U8 = !s.url.includes('.txt') && (s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/'));
-      
-      return {
-        url: isM3U8 ? createAlfaProxy(s.url) : s.url,
-        quality: s.quality || 'auto',
-        type: isM3U8 ? 'hls' : 'mp4',
-        directUrl: s.url
-      };
-    });
+    const sources = sortedSources.map(s => ({
+      url: s.url,
+      quality: s.quality || 'auto',
+      type: s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/') ? 'hls' : 'mp4',
+      referer: this.server.referer
+    }));
 
     return { 
       success: true, 
@@ -359,7 +311,7 @@ class SourceFetcher {
     };
   }
 
-  // 3. OPHIM - No proxy, returns all streams
+  // 3. OPHIM - Direct URLs, no referer
   processOphim(data) {
     if (!data.streams || !Array.isArray(data.streams)) {
       return { 
@@ -373,13 +325,14 @@ class SourceFetcher {
       sources: data.streams.map(s => ({
         url: s.url,
         quality: s.quality || 'HD',
-        type: this.detectStreamType(s.url)
+        type: this.detectStreamType(s.url),
+        referer: this.server.referer
       })),
       subtitles: []
     };
   }
 
-  // 4. BETA - Proxy with videostr referer, upcloud server
+  // 4. BETA - Direct URL with referer
   processBeta(data) {
     if (!data.url) {
       return { 
@@ -398,23 +351,21 @@ class SourceFetcher {
     return {
       success: true,
       sources: [{
-        url: createBetaProxy(data.url),
+        url: data.url,
         quality: 'auto',
         type: 'hls',
-        directUrl: data.url
+        referer: this.server.referer
       }],
       subtitles: subtitles
     };
   }
 
-  // 5. SIGMA - Proxy with flashstream headers, selects 3rd source or last
+  // 5. SIGMA - Direct URL with referer and extra headers
   processSigma(data) {
     if (!data.success || !Array.isArray(data.sources)) {
       return { 
         success: false, 
-        error: "Invalid Sigma response",
-        hasSuccess: data.success,
-        sourcesType: typeof data.sources
+        error: "Invalid Sigma response"
       };
     }
 
@@ -426,22 +377,30 @@ class SourceFetcher {
       };
     }
 
-    // Select 3rd if available, else last
     const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
 
     return {
       success: true,
       sources: [{
-        url: createSigmaProxy(selected.file),
+        url: selected.file,
         quality: selected.label || 'auto',
         type: 'hls',
-        directUrl: selected.file
+        referer: this.server.referer,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+          "Accept": "*/*",
+          "Accept-Language": "en-US,en;q=0.5",
+          "Sec-Fetch-Dest": "empty",
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Site": "cross-site",
+          "Origin": "https://flashstream.cc"
+        }
       }],
       subtitles: []
     };
   }
 
-  // 6. GAMA - Proxy with videostr referer (same as beta but no upcloud param)
+  // 6. GAMA - Direct URL with referer
   processGama(data) {
     if (!data.url) {
       return { 
@@ -460,16 +419,16 @@ class SourceFetcher {
     return {
       success: true,
       sources: [{
-        url: createGamaProxy(data.url),
+        url: data.url,
         quality: 'auto',
         type: 'hls',
-        directUrl: data.url
+        referer: this.server.referer
       }],
       subtitles: subtitles
     };
   }
 
-  // 7. CATFLIX - Cloudflare proxy, sorts by resolution
+  // 7. CATFLIX - Direct URLs with dynamic headers from response
   processCatflix(data) {
     if (!data.url || !Array.isArray(data.url)) {
       return { 
@@ -478,13 +437,15 @@ class SourceFetcher {
       };
     }
 
+    const serverHeaders = data.headers || {};
+    
     const sources = data.url.map(u => ({
-      url: createCatflixProxy(u.link, data.headers || {}),
+      url: u.link,
       quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
       type: u.type || 'mp4',
-      directUrl: u.link
+      referer: serverHeaders.Referer || serverHeaders.referer || null,
+      headers: Object.keys(serverHeaders).length > 0 ? serverHeaders : null
     })).sort((a, b) => {
-      // Sort by resolution (highest first)
       const aq = parseInt(a.quality) || 0;
       const bq = parseInt(b.quality) || 0;
       return bq - aq;
@@ -504,7 +465,7 @@ class SourceFetcher {
     };
   }
 
-  // 8. HEXA - Proxy2 with cleaned headers, extracts playlist
+  // 8. HEXA - Direct URL with dynamic headers from response
   processHexa(data) {
     if (!data.data?.stream?.playlist) {
       return { 
@@ -514,7 +475,7 @@ class SourceFetcher {
     }
 
     const stream = data.data.stream;
-    const headers = data.headers || {};
+    const serverHeaders = data.headers || {};
     
     const subtitles = (stream.captions || [])
       .filter(c => c.url && (c.type === 'vtt' || c.type === 'srt'))
@@ -525,21 +486,20 @@ class SourceFetcher {
         default: false
       }));
 
-    const playlistUrl = stream.playlist;
-
     return {
       success: true,
       sources: [{
-        url: createHexaProxy(playlistUrl, headers),
+        url: stream.playlist,
         quality: 'auto',
         type: 'hls',
-        directUrl: playlistUrl
+        referer: serverHeaders.Referer || serverHeaders.referer || null,
+        headers: Object.keys(serverHeaders).length > 0 ? serverHeaders : null
       }],
       subtitles: subtitles
     };
   }
 
-  // 9. DELTA - No proxy, filters Hindi
+  // 9. DELTA - Direct URL, Hindi filter, no referer
   processDelta(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
     const hindiStream = streams.find(s => 
@@ -559,7 +519,8 @@ class SourceFetcher {
       sources: [{
         url: hindiStream.url,
         quality: 'Hindi',
-        type: this.detectStreamType(hindiStream.url)
+        type: this.detectStreamType(hindiStream.url),
+        referer: this.server.referer
       }],
       subtitles: []
     };
