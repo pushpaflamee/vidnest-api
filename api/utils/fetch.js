@@ -1,9 +1,9 @@
 const fetch = require('node-fetch');
 
-const PROXY_BASE = "https://proxy2.animanga.fun";
-const HLS_PROXY = "https://proxy2.animanga.fun";
+const PROXY_BASE = "https://corsproxy.io/?";
+const HLS_PROXY = "https://corsproxy.io/?";
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   
@@ -12,9 +12,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
       ...options,
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://new.vidnest.fun/',
+        'Origin': 'https://new.vidnest.fun',
         ...options.headers
       }
     });
@@ -27,21 +29,15 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
 }
 
 function createProxyUrl(targetUrl, headers = {}) {
-  const encodedUrl = encodeURIComponent(targetUrl);
-  const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
-  return `${PROXY_BASE}/proxy?url=${encodedUrl}&headers=${encodedHeaders}`;
+  return `${PROXY_BASE}${encodeURIComponent(targetUrl)}`;
 }
 
 function createM3U8ProxyUrl(targetUrl, headers = {}) {
-  const encodedUrl = encodeURIComponent(targetUrl);
-  const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
-  return `${HLS_PROXY}/m3u8-proxy?url=${encodedUrl}&headers=${encodedHeaders}`;
+  return `${HLS_PROXY}${encodeURIComponent(targetUrl)}`;
 }
 
 function createMP4ProxyUrl(targetUrl, headers = {}) {
-  const encodedUrl = encodeURIComponent(targetUrl);
-  const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
-  return `https://cloudflare-m3u8-proxy.animeexost.workers.dev/mp4-proxy?url=${encodedUrl}&headers=${encodedHeaders}`;
+  return `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
 }
 
 module.exports = {
