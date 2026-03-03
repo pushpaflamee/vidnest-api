@@ -1,39 +1,31 @@
-const CryptoJS = require('crypto-js');
+// Node.js Web Crypto API implementation
+const crypto = require('crypto').webcrypto;
 
-// The base64-encoded AES-256 key
 const CIPHER_KEY_BASE64 = "K9vT2mQxL8fWcD3pRZyU+Sa7nB1/M4tHgC6JkPwXe5qOVFbE2rYnLsZdVuA0GhT9";
 
-// Decode the base64 key to get the actual 32-byte AES-256 key
-function getKey() {
-  // Remove any whitespace and decode base64
-  const cleanKey = CIPHER_KEY_BASE64.replace(/\s/g, '');
-  const keyWords = CryptoJS.enc.Base64.parse(cleanKey);
-  return keyWords;
-}
-
 /**
- * Decrypt AES-256-GCM response
+ * Decrypt response using Web Crypto API (AES-256-GCM)
  * Format: { encrypted: true, data: "<base64(12-byte IV + ciphertext)>" }
  */
-function decryptCipherResponse(response, keyBase64 = CIPHER_KEY_BASE64) {
+async function decryptCipherResponse(response, keyBase64 = CIPHER_KEY_BASE64) {
   try {
-    // If response is string, try to parse as JSON
+    // Parse JSON if string
     let data = response;
     if (typeof response === 'string') {
       try {
         data = JSON.parse(response);
       } catch (e) {
-        // Not JSON, treat as raw encrypted string
-        return decryptRaw(response, keyBase64);
+        // Not JSON, try direct decrypt
+        return await decryptRaw(response, keyBase64);
       }
     }
 
-    // Check if it's the encrypted format
+    // Check if encrypted
     if (data && data.encrypted === true && data.data) {
-      return decryptRaw(data.data, keyBase64);
+      return await decryptRaw(data.data, keyBase64);
     }
 
-    // If not encrypted, return as-is
+    // Not encrypted, return as-is
     if (data && (data.sources || data.streams || data.url || data.success)) {
       return data;
     }
@@ -46,150 +38,74 @@ function decryptCipherResponse(response, keyBase64 = CIPHER_KEY_BASE64) {
 }
 
 /**
- * Decrypt raw base64 string (IV + ciphertext)
+ * Decrypt raw base64 string using Web Crypto API
  * IV = first 12 bytes, rest = ciphertext
  */
-function decryptRaw(base64String, keyBase64) {
+async function decryptRaw(base64String, keyBase64) {
   try {
-    // Clean the base64 string
+    // Clean base64 string
     const cleanBase64 = base64String.replace(/\s/g, '');
     
-    // Decode base64 to WordArray
-    const encryptedWords = CryptoJS.enc.Base64.parse(cleanBase64);
-    const encryptedBytes = wordArrayToUint8Array(encryptedWords);
+    // Step 1: Prepare the key (32 bytes for AES-256)
+    const keyBytes = base64ToUint8Array(keyBase64);
+    const key32 = keyBytes.slice(0, 32); // Truncate/pad to exactly 32 bytes
     
-    if (encryptedBytes.length < 13) {
-      throw new Error('Data too short (needs at least 12 bytes IV + 1 byte ciphertext)');
-    }
-
-    // Extract IV (first 12 bytes) and ciphertext (rest)
-    const iv = encryptedBytes.slice(0, 12);
-    const ciphertext = encryptedBytes.slice(12);
-
-    // Decode the key from base64
-    const keyClean = keyBase64.replace(/\s/g, '');
-    const keyWords = CryptoJS.enc.Base64.parse(keyClean);
-    
-    // Convert to proper format for CryptoJS
-    const ivWords = bytesToWordArray(iv);
-    const ciphertextWords = bytesToWordArray(ciphertext);
-
-    // Try AES-GCM decryption
-    const decrypted = CryptoJS.AES.decrypt(
-      { ciphertext: ciphertextWords },
-      keyWords,
-      {
-        iv: ivWords,
-        mode: CryptoJS.mode.GCM,
-        padding: CryptoJS.pad.NoPadding
-      }
+    // Import key into Web Crypto
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      key32,
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
     );
 
-    const result = decrypted.toString(CryptoJS.enc.Utf8);
+    // Step 2: Decode the encrypted data
+    const encryptedBytes = base64ToUint8Array(cleanBase64);
     
-    if (!result) {
-      throw new Error('Decryption returned empty result');
+    if (encryptedBytes.length < 13) {
+      throw new Error('Data too short (needs 12 bytes IV + at least 1 byte ciphertext)');
     }
+
+    // Step 3: Split IV and ciphertext
+    const iv = encryptedBytes.slice(0, 12); // First 12 bytes = IV
+    const ciphertext = encryptedBytes.slice(12); // Rest = ciphertext
+
+    // Step 4: Decrypt
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv
+      },
+      cryptoKey,
+      ciphertext
+    );
+
+    // Step 5: Decode result
+    const decoder = new TextDecoder();
+    const decryptedText = decoder.decode(decryptedBuffer);
 
     // Try to parse as JSON
     try {
-      return JSON.parse(result);
+      return JSON.parse(decryptedText);
     } catch (e) {
-      // Return as string if not valid JSON
-      return { decryptedText: result, isJson: false };
+      return { decryptedText, isJson: false };
     }
 
   } catch (error) {
     console.error('Raw decryption failed:', error.message);
-    
-    // Fallback: try different methods
-    return tryFallbackDecryption(base64String, keyBase64);
+    return null;
   }
 }
 
 /**
- * Fallback decryption methods
+ * Convert base64 string to Uint8Array
  */
-function tryFallbackDecryption(base64String, keyBase64) {
-  const methods = [
-    // Method 1: Standard AES-CBC with IV prepended
-    () => {
-      const encrypted = CryptoJS.enc.Base64.parse(base64String);
-      const bytes = wordArrayToUint8Array(encrypted);
-      const iv = bytes.slice(0, 16);
-      const ciphertext = bytes.slice(16);
-      
-      const key = CryptoJS.enc.Base64.parse(keyBase64);
-      
-      const decrypted = CryptoJS.AES.decrypt(
-        { ciphertext: bytesToWordArray(ciphertext) },
-        key,
-        { iv: bytesToWordArray(iv), mode: CryptoJS.mode.CBC }
-      );
-      
-      return decrypted.toString(CryptoJS.enc.Utf8);
-    },
-    
-    // Method 2: Direct AES decrypt (ECB)
-    () => {
-      const key = CryptoJS.enc.Base64.parse(keyBase64);
-      const decrypted = CryptoJS.AES.decrypt(base64String, key, {
-        mode: CryptoJS.mode.ECB
-      });
-      return decrypted.toString(CryptoJS.enc.Utf8);
-    },
-    
-    // Method 3: Try as simple base64 decode (maybe not encrypted)
-    () => {
-      const decoded = atob(base64String);
-      return decoded;
-    }
-  ];
-
-  for (let i = 0; i < methods.length; i++) {
-    try {
-      const result = methods[i]();
-      if (result && result.length > 0) {
-        console.log(`Fallback method ${i + 1} succeeded`);
-        try {
-          return JSON.parse(result);
-        } catch (e) {
-          return { decryptedText: result, isJson: false, method: `fallback-${i + 1}` };
-        }
-      }
-    } catch (e) {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Convert WordArray to Uint8Array
- */
-function wordArrayToUint8Array(wordArray) {
-  const words = wordArray.words;
-  const sigBytes = wordArray.sigBytes;
-  const u8 = new Uint8Array(sigBytes);
+function base64ToUint8Array(base64String) {
+  // Remove whitespace and padding for atob
+  const clean = base64String.replace(/\s/g, '');
   
-  for (let i = 0; i < sigBytes; i++) {
-    const byte = (words[Math.floor(i / 4)] >>> (24 - (i % 4) * 8)) & 0xff;
-    u8[i] = byte;
-  }
-  
-  return u8;
-}
-
-/**
- * Convert Uint8Array to WordArray
- */
-function bytesToWordArray(bytes) {
-  const words = [];
-  for (let i = 0; i < bytes.length; i++) {
-    words[i >>> 2] |= bytes[i] << (24 - (i % 4) * 8);
-  }
-  return CryptoJS.lib.WordArray.create(words, bytes.length);
+  // Use Buffer for Node.js (faster than atob)
+  return new Uint8Array(Buffer.from(clean, 'base64'));
 }
 
 /**
@@ -210,12 +126,10 @@ function cleanHeaders(headers) {
 }
 
 /**
- * Clean URL (remove proxy prefixes if present)
+ * Clean URL
  */
 function cleanUrl(url) {
   if (!url) return '';
-  
-  // If URL is wrapped in a proxy, extract the original
   if (url.includes('/proxy?url=')) {
     const match = url.match(/[?&]url=([^&]+)/);
     if (match) {
@@ -226,7 +140,6 @@ function cleanUrl(url) {
       }
     }
   }
-  
   return url;
 }
 
