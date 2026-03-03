@@ -1,0 +1,17 @@
+{
+  "name": "vidnest-api",
+  "version": "1.1.0",
+  "description": "Scraping Vidnest for movies and TV shows",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "crypto-js": "^4.2.0",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
