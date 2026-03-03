@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  const { id, season, episode, server = 'lamda', debug = 'true' } = req.query;
+  const { id, season, episode, server = 'lamda' } = req.query;
 
   if (!id || !season || !episode) {
     return res.status(400).json({
@@ -29,10 +29,21 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const fetcher = new SourceFetcher(serverKey, id, 'tv', season, episode);
-    const result = await fetcher.fetch();
-    
-    const extractedUrls = extractUrls(result.raw);
+    const [metadata, videoData] = await Promise.all([
+      getTvDetails(id, season, episode),
+      new SourceFetcher(serverKey, id, 'tv', season, episode).fetch()
+    ]);
+
+    if (!videoData.success) {
+      return res.status(404).json({
+        success: false,
+        error: videoData.error || "Failed to fetch video",
+        server: serverKey,
+        tmdbId: id,
+        season,
+        episode
+      });
+    }
 
     const response = {
       success: true,
@@ -40,15 +51,12 @@ module.exports = async (req, res) => {
       tmdbId: id,
       season: parseInt(season),
       episode: parseInt(episode),
-      endpoint: result.endpoint,
-      contentType: result.contentType,
-      isJson: result.isJson,
-      hint: result.hint,
-      responseLength: result.raw.length,
-      raw: debug === 'true' ? result.raw.substring(0, 5000) : '[hidden]',
-      parsed: result.parsed,
-      extractedUrls: extractedUrls,
-      timestamp: new Date().toISOString()
+      title: metadata?.title || `S${season}E${episode}`,
+      showName: metadata?.showName,
+      episodeName: metadata?.episodeName,
+      poster: metadata?.poster,
+      sources: videoData.sources || [],
+      subtitles: videoData.subtitles || []
     };
 
     return res.status(200).json(response);
@@ -65,10 +73,3 @@ module.exports = async (req, res) => {
     });
   }
 };
-
-function extractUrls(text) {
-  if (!text) return [];
-  const urlRegex = /(https?:\/\/[^\s"'<>]+)/g;
-  const matches = text.match(urlRegex) || [];
-  return [...new Set(matches)].slice(0, 10);
-}
