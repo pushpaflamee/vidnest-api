@@ -88,46 +88,47 @@ class SourceFetcher {
 
       const rawText = await response.text();
       
-      // Try to parse as JSON first
+      // Try to parse as JSON
       let jsonData = null;
       try {
         jsonData = JSON.parse(rawText);
       } catch (e) {
-        // Not JSON
+        // Not valid JSON
       }
 
-      // Check if encrypted
+      // Decrypt if needed (NOW ASYNC)
       let decrypted = null;
       let wasEncrypted = false;
       
       if (jsonData && jsonData.encrypted === true && jsonData.data) {
         wasEncrypted = true;
-        decrypted = decryptCipherResponse(jsonData, CIPHER_KEY_BASE64);
+        decrypted = await decryptCipherResponse(jsonData, CIPHER_KEY_BASE64);
         
         if (!decrypted) {
-          console.log(`[${this.serverKey}] Decryption failed, trying fallback...`);
-          // Try without the encrypted wrapper
-          decrypted = decryptCipherResponse(jsonData.data, CIPHER_KEY_BASE64);
+          console.log(`[${this.serverKey}] Decryption failed`);
+          return {
+            success: false,
+            error: "Decryption failed",
+            rawPreview: rawText.substring(0, 500),
+            wasEncrypted: true
+          };
         }
       } else if (jsonData) {
-        // Not encrypted
         decrypted = jsonData;
       } else {
-        // Raw text, try direct decryption
-        decrypted = decryptCipherResponse(rawText, CIPHER_KEY_BASE64);
+        // Try direct decrypt of raw text
+        decrypted = await decryptCipherResponse(rawText, CIPHER_KEY_BASE64);
       }
 
       if (!decrypted) {
         return {
           success: false,
-          error: "Failed to decrypt response",
-          raw: rawText.substring(0, 1000),
-          wasEncrypted: wasEncrypted,
-          hint: "Check if encryption key or method changed"
+          error: "Failed to parse/decrypt response",
+          rawPreview: rawText.substring(0, 500)
         };
       }
 
-      // Process the decrypted data based on server type
+      // Process based on server type
       return this.processData(decrypted);
 
     } catch (error) {
@@ -151,9 +152,8 @@ class SourceFetcher {
   }
 
   processData(data) {
-    // Log what we got for debugging
-    console.log(`[${this.serverKey}] Decrypted keys:`, Object.keys(data));
-    
+    console.log(`[${this.serverKey}] Processing data with keys:`, Object.keys(data));
+
     switch (this.server.type) {
       case 'lamda':
         return this.processLamda(data);
@@ -175,9 +175,9 @@ class SourceFetcher {
       default:
         return {
           success: true,
-          rawData: data,
           sources: [],
-          subtitles: []
+          subtitles: [],
+          rawData: data
         };
     }
   }
@@ -189,7 +189,11 @@ class SourceFetcher {
     ) || streams[0];
 
     if (!englishStream?.url) {
-      return { success: false, error: "No English stream found", availableLanguages: streams.map(s => s.language) };
+      return { 
+        success: false, 
+        error: "No stream URL found",
+        availableStreams: streams.length
+      };
     }
 
     return {
@@ -205,7 +209,7 @@ class SourceFetcher {
 
   processOphim(data) {
     if (!data.streams || !Array.isArray(data.streams)) {
-      return { success: false, error: "No streams array in response", keys: Object.keys(data) };
+      return { success: false, error: "No streams array" };
     }
 
     return {
@@ -221,10 +225,9 @@ class SourceFetcher {
 
   processFlixHQ(data) {
     if (!data.url) {
-      return { success: false, error: "No URL in FlixHQ response", keys: Object.keys(data) };
+      return { success: false, error: "No URL in response" };
     }
 
-    const headers = { Referer: "https://videostr.net/" };
     const subtitles = (data.subtitles || []).map(s => ({
       url: s.url,
       lang: s.lang || 'en',
@@ -235,7 +238,7 @@ class SourceFetcher {
     return {
       success: true,
       sources: [{
-        url: createProxyUrl(data.url, headers),
+        url: createProxyUrl(data.url, { Referer: "https://videostr.net/" }),
         quality: 'auto',
         type: 'hls'
       }],
@@ -245,18 +248,14 @@ class SourceFetcher {
 
   processCatflix(data) {
     if (!data.url || !Array.isArray(data.url)) {
-      return { success: false, error: "No URL array in Catflix response" };
+      return { success: false, error: "Invalid Catflix URL format" };
     }
 
     const sources = data.url.map(u => ({
       url: createMP4ProxyUrl(u.link, data.headers || {}),
       quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
       type: u.type || 'mp4'
-    })).sort((a, b) => {
-      const aq = parseInt(a.quality) || 0;
-      const bq = parseInt(b.quality) || 0;
-      return bq - aq;
-    });
+    })).sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
 
     const subtitles = (data.tracks || []).map(t => ({
       url: t.file,
@@ -270,12 +269,12 @@ class SourceFetcher {
 
   processSigma(data) {
     if (!data.success || !Array.isArray(data.sources)) {
-      return { success: false, error: "Invalid Sigma response", keys: Object.keys(data) };
+      return { success: false, error: "Invalid Sigma response" };
     }
 
     const hlsSources = data.sources.filter(s => s.type === 'hls' && s.file);
     if (!hlsSources.length) {
-      return { success: false, error: "No HLS sources found" };
+      return { success: false, error: "No HLS sources" };
     }
 
     const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
@@ -304,7 +303,7 @@ class SourceFetcher {
 
   processHexa(data) {
     if (!data.data?.stream?.playlist) {
-      return { success: false, error: "No playlist in Hexa response", keys: Object.keys(data) };
+      return { success: false, error: "No playlist in Hexa data" };
     }
 
     const stream = data.data.stream;
@@ -341,8 +340,8 @@ class SourceFetcher {
     if (!hindiStream?.url) {
       return { 
         success: false, 
-        error: "Hindi stream not available", 
-        availableLanguages: streams.map(s => s.language) 
+        error: "Hindi stream not available",
+        availableLanguages: streams.map(s => s.language)
       };
     }
 
@@ -359,18 +358,17 @@ class SourceFetcher {
 
   processAlfa(data) {
     if (!data.sources || !Array.isArray(data.sources)) {
-      return { success: false, error: "No sources in Alfa response", keys: Object.keys(data) };
+      return { success: false, error: "No sources in Alfa response" };
     }
 
     const validSources = data.sources.filter(s => {
       if (!s.url) return false;
       const isM3U8 = s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/') || s.url.includes('master');
-      const isTXT = s.url.includes('.txt');
-      return isM3U8 || isTXT;
+      return isM3U8 || s.url.includes('.txt');
     });
 
     if (!validSources.length) {
-      return { success: false, error: "No valid sources found", totalSources: data.sources.length };
+      return { success: false, error: "No valid sources found" };
     }
 
     const sources = validSources.map(s => {
@@ -378,7 +376,6 @@ class SourceFetcher {
       const isM3U8 = !s.url.includes('.txt') && (s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/'));
       
       if (isM3U8) {
-        const headers = encodeURIComponent(JSON.stringify({ Referer: "https://primevid.click/" }));
         url = `https://corsproxy.io/?${encodeURIComponent(s.url)}`;
       }
 
