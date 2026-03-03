@@ -72,8 +72,8 @@ GET /api/tv?id={tmdbId}&season={season}&episode={episode}&server={serverName}
 | delta   | Hindi          | Hindi language content    |
 | alfa    | PrimeVid       | Multiple source types     |
 
-##Local Development
+## Local Development
 npm install
 vercel dev
 
-##License : MIT
+## License : MIT
