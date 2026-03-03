@@ -1,4 +1,4 @@
-const { fetchWithTimeout, createProxyUrl, createM3U8ProxyUrl, createMP4ProxyUrl } = require('./fetch');
+const { fetchWithTimeout, createProxyUrl, createM3U8ProxyUrl, createMP4ProxyUrl, createDirectUrl } = require('./fetch');
 const { decryptCipherResponse, cleanHeaders, cleanUrl, CIPHER_KEY_BASE64 } = require('./decrypt');
 
 const BASE_URL = "https://new.vidnest.fun";
@@ -61,7 +61,7 @@ const SERVERS = {
 };
 
 class SourceFetcher {
-  constructor(serverKey, tmdbId, type = 'movie', season = null, episode = null) {
+  constructor(serverKey, tmdbId, type = 'movie', season = null, episode = null, useProxy = true) {
     this.server = SERVERS[serverKey];
     this.serverKey = serverKey;
     this.tmdbId = tmdbId;
@@ -69,6 +69,7 @@ class SourceFetcher {
     this.season = season;
     this.episode = episode;
     this.timeout = 15000;
+    this.useProxy = useProxy;
   }
 
   async fetch() {
@@ -96,7 +97,7 @@ class SourceFetcher {
         // Not valid JSON
       }
 
-      // Decrypt if needed (NOW ASYNC)
+      // Decrypt if needed
       let decrypted = null;
       let wasEncrypted = false;
       
@@ -105,7 +106,6 @@ class SourceFetcher {
         decrypted = await decryptCipherResponse(jsonData, CIPHER_KEY_BASE64);
         
         if (!decrypted) {
-          console.log(`[${this.serverKey}] Decryption failed`);
           return {
             success: false,
             error: "Decryption failed",
@@ -116,7 +116,6 @@ class SourceFetcher {
       } else if (jsonData) {
         decrypted = jsonData;
       } else {
-        // Try direct decrypt of raw text
         decrypted = await decryptCipherResponse(rawText, CIPHER_KEY_BASE64);
       }
 
@@ -128,7 +127,6 @@ class SourceFetcher {
         };
       }
 
-      // Process based on server type
       return this.processData(decrypted);
 
     } catch (error) {
@@ -139,12 +137,25 @@ class SourceFetcher {
 
   getEndpoint() {
     const base = this.type === 'movie' ? this.server.movieUrl : this.server.tvUrl;
+    
+    // Sigma has different path structure
+    if (this.serverKey === 'sigma') {
+      if (this.type === 'movie') {
+        return `${base}/movie/${this.tmdbId}`;
+      } else {
+        return `${base}/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+      }
+    }
+    
+    // Standard structure
     if (this.type === 'movie') {
       if (this.serverKey === 'beta') {
         return `${base}/${this.tmdbId}?server=upcloud`;
       }
       return `${base}/${this.tmdbId}`;
     }
+    
+    // TV structure
     if (this.serverKey === 'beta') {
       return `${base}/${this.tmdbId}/${this.season}/${this.episode}?server=upcloud`;
     }
@@ -199,9 +210,10 @@ class SourceFetcher {
     return {
       success: true,
       sources: [{
-        url: englishStream.url,
+        url: this.useProxy ? createProxyUrl(englishStream.url) : englishStream.url,
         quality: englishStream.quality || 'English',
-        type: this.detectStreamType(englishStream.url)
+        type: this.detectStreamType(englishStream.url),
+        directUrl: englishStream.url // Include direct URL for testing
       }],
       subtitles: []
     };
@@ -215,9 +227,10 @@ class SourceFetcher {
     return {
       success: true,
       sources: data.streams.map(s => ({
-        url: s.url,
+        url: this.useProxy ? createProxyUrl(s.url) : s.url,
         quality: s.quality || 'HD',
-        type: this.detectStreamType(s.url)
+        type: this.detectStreamType(s.url),
+        directUrl: s.url
       })),
       subtitles: []
     };
@@ -235,12 +248,17 @@ class SourceFetcher {
       default: !!s.default
     }));
 
+    const directUrl = data.url;
+    const proxiedUrl = createProxyUrl(data.url);
+
     return {
       success: true,
       sources: [{
-        url: createProxyUrl(data.url, { Referer: "https://videostr.net/" }),
+        url: this.useProxy ? proxiedUrl : directUrl,
         quality: 'auto',
-        type: 'hls'
+        type: 'hls',
+        directUrl: directUrl,
+        proxiedUrl: proxiedUrl
       }],
       subtitles
     };
@@ -251,11 +269,15 @@ class SourceFetcher {
       return { success: false, error: "Invalid Catflix URL format" };
     }
 
-    const sources = data.url.map(u => ({
-      url: createMP4ProxyUrl(u.link, data.headers || {}),
-      quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
-      type: u.type || 'mp4'
-    })).sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+    const sources = data.url.map(u => {
+      const directUrl = u.link;
+      return {
+        url: this.useProxy ? createMP4ProxyUrl(directUrl) : directUrl,
+        quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
+        type: u.type || 'mp4',
+        directUrl: directUrl
+      };
+    }).sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
 
     const subtitles = (data.tracks || []).map(t => ({
       url: t.file,
@@ -269,17 +291,27 @@ class SourceFetcher {
 
   processSigma(data) {
     if (!data.success || !Array.isArray(data.sources)) {
-      return { success: false, error: "Invalid Sigma response" };
+      return { 
+        success: false, 
+        error: "Invalid Sigma response", 
+        keys: Object.keys(data),
+        hasSuccess: data.success,
+        sourcesType: typeof data.sources
+      };
     }
 
     const hlsSources = data.sources.filter(s => s.type === 'hls' && s.file);
     if (!hlsSources.length) {
-      return { success: false, error: "No HLS sources" };
+      return { success: false, error: "No HLS sources", totalSources: data.sources.length };
     }
 
+    // Pick best quality (usually index 2 if available, else last)
     const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
     
-    const headers = {
+    const directUrl = selected.file;
+    
+    // Sigma needs specific headers
+    const headerString = encodeURIComponent(JSON.stringify({
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
       "accept": "*/*",
       "accept-language": "en-US,en;q=0.5",
@@ -288,14 +320,23 @@ class SourceFetcher {
       "sec-fetch-site": "cross-site",
       "origin": "https://flashstream.cc",
       "referer": "https://flashstream.cc/"
-    };
+    }));
+
+    // Use a proxy that supports custom headers
+    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
 
     return {
       success: true,
       sources: [{
-        url: createProxyUrl(selected.file, headers),
+        url: this.useProxy ? proxiedUrl : directUrl,
         quality: selected.label || 'auto',
-        type: 'hls'
+        type: 'hls',
+        directUrl: directUrl,
+        headers: {
+          "Referer": "https://flashstream.cc/",
+          "Origin": "https://flashstream.cc",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0"
+        }
       }],
       subtitles: []
     };
@@ -318,14 +359,16 @@ class SourceFetcher {
         default: false
       }));
 
-    const playlistUrl = cleanUrl(stream.playlist);
+    const directUrl = cleanUrl(stream.playlist);
+    const proxiedUrl = createM3U8ProxyUrl(directUrl);
 
     return {
       success: true,
       sources: [{
-        url: `https://corsproxy.io/?${encodeURIComponent(playlistUrl)}`,
+        url: this.useProxy ? proxiedUrl : directUrl,
         quality: 'auto',
-        type: 'hls'
+        type: 'hls',
+        directUrl: directUrl
       }],
       subtitles
     };
@@ -348,9 +391,10 @@ class SourceFetcher {
     return {
       success: true,
       sources: [{
-        url: hindiStream.url,
+        url: this.useProxy ? createProxyUrl(hindiStream.url) : hindiStream.url,
         quality: 'Hindi',
-        type: this.detectStreamType(hindiStream.url)
+        type: this.detectStreamType(hindiStream.url),
+        directUrl: hindiStream.url
       }],
       subtitles: []
     };
@@ -372,17 +416,14 @@ class SourceFetcher {
     }
 
     const sources = validSources.map(s => {
-      let url = s.url;
+      const directUrl = s.url;
       const isM3U8 = !s.url.includes('.txt') && (s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/'));
       
-      if (isM3U8) {
-        url = `https://corsproxy.io/?${encodeURIComponent(s.url)}`;
-      }
-
       return {
-        url,
+        url: this.useProxy ? `https://corsproxy.io/?${encodeURIComponent(directUrl)}` : directUrl,
         quality: s.quality || 'auto',
-        type: isM3U8 ? 'hls' : 'mp4'
+        type: isM3U8 ? 'hls' : 'mp4',
+        directUrl: directUrl
       };
     });
 
