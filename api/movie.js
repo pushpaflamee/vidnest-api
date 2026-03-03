@@ -30,13 +30,14 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [metadata, videoData] = await Promise.all([
-      getMovieDetails(id),
-      new SourceFetcher(serverKey, id, 'movie', null, null, useProxy).fetch()
-    ]);
+    // Fetch video data first to get decrypted response
+    const fetcher = new SourceFetcher(serverKey, id, 'movie', null, null, useProxy);
+    const videoData = await fetcher.fetch();
 
+    // If decryption/processing failed
     if (!videoData.success) {
       return res.status(404).json({
+        decryptedResponse: videoData.rawData || videoData.decrypted || null,
         success: false,
         error: videoData.error || "Failed to fetch video",
         server: serverKey,
@@ -45,7 +46,24 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Get metadata separately (don't block if it fails)
+    let metadata = null;
+    try {
+      metadata = await getMovieDetails(id);
+    } catch (e) {
+      console.log('Metadata fetch failed:', e.message);
+    }
+
+    // Build response with decrypted data FIRST
     const response = {
+      // 1. Full decrypted response from the server
+      decryptedResponse: videoData.rawData || null,
+      
+      // 2. Processed video sources
+      sources: videoData.sources || [],
+      subtitles: videoData.subtitles || [],
+      
+      // 3. Metadata
       success: true,
       server: serverKey,
       tmdbId: id,
@@ -53,10 +71,11 @@ module.exports = async (req, res) => {
       poster: metadata?.poster,
       backdrop: metadata?.backdrop,
       year: metadata?.year,
-      sources: videoData.sources || [],
-      subtitles: videoData.subtitles || [],
+      overview: metadata?.overview,
+      
+      // 4. Other info
       proxyUsed: useProxy,
-      note: "Use ?proxy=false to get direct URLs (may have CORS issues)"
+      note: "Use ?proxy=false to get direct URLs"
     };
 
     return res.status(200).json(response);
@@ -64,6 +83,7 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('Movie API Error:', error);
     return res.status(500).json({
+      decryptedResponse: null,
       success: false,
       error: error.message,
       server: serverKey,
