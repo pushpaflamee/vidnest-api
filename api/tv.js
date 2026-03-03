@@ -11,8 +11,7 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  const { id, season, episode, server = 'lamda', proxy = 'true' } = req.query;
-  const useProxy = proxy !== 'false';
+  const { id, season, episode, server = 'lamda' } = req.query;
 
   if (!id || !season || !episode) {
     return res.status(400).json({
@@ -30,12 +29,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const fetcher = new SourceFetcher(serverKey, id, 'tv', season, episode, useProxy);
+    const fetcher = new SourceFetcher(serverKey, id, 'tv', season, episode);
     const videoData = await fetcher.fetch();
 
     if (!videoData.success) {
       return res.status(404).json({
-        decryptedResponse: videoData.rawData || null,
         success: false,
         error: videoData.error || "Failed to fetch video"
       });
@@ -49,18 +47,21 @@ module.exports = async (req, res) => {
     }
 
     const response = {
-      decryptedResponse: videoData.rawData || null,
+      // 1. URLs (sources)
+      sources: videoData.sources || [],
+      
+      // 2. Subtitles
+      subtitles: videoData.subtitles || [],
+      
+      // 3. Metadata only
       success: true,
       server: serverKey,
       tmdbId: id,
       season: parseInt(season),
       episode: parseInt(episode),
       title: metadata?.title || `S${season}E${episode}`,
-      showName: metadata?.showName,
-      episodeName: metadata?.episodeName,
       poster: metadata?.poster,
-      sources: videoData.sources || [],
-      subtitles: videoData.subtitles || []
+      backdrop: metadata?.backdrop
     };
 
     return res.status(200).json(response);
@@ -68,13 +69,8 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('TV API Error:', error);
     return res.status(500).json({
-      decryptedResponse: null,
       success: false,
-      error: error.message,
-      server: serverKey,
-      tmdbId: id,
-      season: parseInt(season),
-      episode: parseInt(episode)
+      error: error.message
     });
   }
 };
