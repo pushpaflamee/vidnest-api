@@ -11,7 +11,8 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  const { id, season, episode, server = 'lamda' } = req.query;
+  const { id, season, episode, server = 'lamda', proxy = 'true' } = req.query;
+  const useProxy = proxy !== 'false';
 
   if (!id || !season || !episode) {
     return res.status(400).json({
@@ -29,23 +30,42 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [metadata, videoData] = await Promise.all([
-      getTvDetails(id, season, episode),
-      new SourceFetcher(serverKey, id, 'tv', season, episode).fetch()
-    ]);
+    // Fetch video data first to get decrypted response
+    const fetcher = new SourceFetcher(serverKey, id, 'tv', season, episode, useProxy);
+    const videoData = await fetcher.fetch();
 
+    // If decryption/processing failed
     if (!videoData.success) {
       return res.status(404).json({
+        decryptedResponse: videoData.rawData || videoData.decrypted || null,
         success: false,
         error: videoData.error || "Failed to fetch video",
         server: serverKey,
         tmdbId: id,
-        season,
-        episode
+        season: parseInt(season),
+        episode: parseInt(episode),
+        details: videoData
       });
     }
 
+    // Get metadata separately (don't block if it fails)
+    let metadata = null;
+    try {
+      metadata = await getTvDetails(id, season, episode);
+    } catch (e) {
+      console.log('Metadata fetch failed:', e.message);
+    }
+
+    // Build response with decrypted data FIRST
     const response = {
+      // 1. Full decrypted response from the server
+      decryptedResponse: videoData.rawData || null,
+      
+      // 2. Processed video sources
+      sources: videoData.sources || [],
+      subtitles: videoData.subtitles || [],
+      
+      // 3. Metadata
       success: true,
       server: serverKey,
       tmdbId: id,
@@ -55,8 +75,11 @@ module.exports = async (req, res) => {
       showName: metadata?.showName,
       episodeName: metadata?.episodeName,
       poster: metadata?.poster,
-      sources: videoData.sources || [],
-      subtitles: videoData.subtitles || []
+      backdrop: metadata?.backdrop,
+      
+      // 4. Other info
+      proxyUsed: useProxy,
+      note: "Use ?proxy=false to get direct URLs"
     };
 
     return res.status(200).json(response);
@@ -64,12 +87,13 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('TV API Error:', error);
     return res.status(500).json({
+      decryptedResponse: null,
       success: false,
       error: error.message,
       server: serverKey,
       tmdbId: id,
-      season,
-      episode
+      season: parseInt(season),
+      episode: parseInt(episode)
     });
   }
 };
