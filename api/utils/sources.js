@@ -1,54 +1,18 @@
 const { fetchWithTimeout } = require('./fetch');
-const { decryptCipherResponse, CIPHER_KEY_BASE64 } = require('./decrypt');
+const { decryptCipherResponse, cleanHeaders } = require('./decrypt');
 
 const BASE_URL = "https://new.vidnest.fun";
 
 const SERVERS = {
-  lamda: {
-    name: "Lamda",
-    type: "lamda",
-    referer: null // No referer needed
-  },
-  alfa: {
-    name: "Alfa",
-    type: "alfa",
-    referer: "https://primevid.click/"
-  },
-  ophim: {
-    name: "Ophim",
-    type: "ophim",
-    referer: null // No referer needed
-  },
-  beta: {
-    name: "Beta",
-    type: "beta",
-    referer: "https://videostr.net/"
-  },
-  sigma: {
-    name: "Sigma",
-    type: "sigma",
-    referer: "https://flashstream.cc/"
-  },
-  gama: {
-    name: "Gama",
-    type: "gama",
-    referer: "https://videostr.net/"
-  },
-  catflix: {
-    name: "Catflix",
-    type: "catflix",
-    referer: null // Headers passed per request
-  },
-  hexa: {
-    name: "Hexa",
-    type: "hexa",
-    referer: null // Dynamic from response
-  },
-  delta: {
-    name: "Delta",
-    type: "delta",
-    referer: null // No referer needed
-  }
+  lamda: { name: "Lamda", type: "lamda", referer: null },
+  alfa: { name: "Alfa", type: "alfa", referer: "https://primevid.click/" },
+  ophim: { name: "Ophim", type: "ophim", referer: null },
+  beta: { name: "Beta", type: "beta", referer: "https://videostr.net/" },
+  sigma: { name: "Sigma", type: "sigma", referer: "https://flashstream.cc/" },
+  gama: { name: "Gama", type: "gama", referer: "https://videostr.net/" },
+  catflix: { name: "Catflix", type: "catflix", referer: null },
+  hexa: { name: "Hexa", type: "hexa", referer: null },
+  delta: { name: "Delta", type: "delta", referer: null }
 };
 
 class SourceFetcher {
@@ -88,20 +52,22 @@ class SourceFetcher {
 
       let decrypted = null;
       
+      // Check if encrypted and decrypt via server endpoint
       if (jsonData && jsonData.encrypted === true && jsonData.data) {
-        decrypted = await decryptCipherResponse(jsonData, CIPHER_KEY_BASE64);
+        decrypted = await decryptCipherResponse(jsonData);
         
         if (!decrypted) {
           return {
             success: false,
-            error: "Decryption failed",
+            error: "Decryption failed via server endpoint",
             rawData: jsonData
           };
         }
       } else if (jsonData) {
         decrypted = jsonData;
       } else {
-        decrypted = await decryptCipherResponse(rawText, CIPHER_KEY_BASE64);
+        // Try decrypt raw text just in case
+        decrypted = await decryptCipherResponse(rawText);
       }
 
       if (!decrypted) {
@@ -196,45 +162,22 @@ class SourceFetcher {
     let result;
     
     switch (this.serverKey) {
-      case 'lamda':
-        result = this.processLamda(data);
-        break;
-      case 'alfa':
-        result = this.processAlfa(data);
-        break;
-      case 'ophim':
-        result = this.processOphim(data);
-        break;
-      case 'beta':
-        result = this.processBeta(data);
-        break;
-      case 'sigma':
-        result = this.processSigma(data);
-        break;
-      case 'gama':
-        result = this.processGama(data);
-        break;
-      case 'catflix':
-        result = this.processCatflix(data);
-        break;
-      case 'hexa':
-        result = this.processHexa(data);
-        break;
-      case 'delta':
-        result = this.processDelta(data);
-        break;
-      default:
-        result = {
-          success: false,
-          error: "Unknown server processor"
-        };
+      case 'lamda': result = this.processLamda(data); break;
+      case 'alfa': result = this.processAlfa(data); break;
+      case 'ophim': result = this.processOphim(data); break;
+      case 'beta': result = this.processBeta(data); break;
+      case 'sigma': result = this.processSigma(data); break;
+      case 'gama': result = this.processGama(data); break;
+      case 'catflix': result = this.processCatflix(data); break;
+      case 'hexa': result = this.processHexa(data); break;
+      case 'delta': result = this.processDelta(data); break;
+      default: result = { success: false, error: "Unknown server processor" };
     }
 
     result.rawData = data;
     return result;
   }
 
-  // 1. LAMDA - Direct URL, English filter, no referer
   processLamda(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
     const englishStream = streams.find(s => 
@@ -261,13 +204,9 @@ class SourceFetcher {
     };
   }
 
-  // 2. ALFA - Direct URL with referer
   processAlfa(data) {
     if (!data.sources || !Array.isArray(data.sources)) {
-      return { 
-        success: false, 
-        error: "No sources in Alfa response"
-      };
+      return { success: false, error: "No sources in Alfa response" };
     }
 
     const validSources = data.sources.filter(s => {
@@ -277,10 +216,7 @@ class SourceFetcher {
     });
 
     if (!validSources.length) {
-      return { 
-        success: false, 
-        error: "No valid M3U8/HLS sources found"
-      };
+      return { success: false, error: "No valid M3U8/HLS sources found" };
     }
 
     const sortedSources = validSources.sort((a, b) => {
@@ -304,20 +240,12 @@ class SourceFetcher {
       referer: this.server.referer
     }));
 
-    return { 
-      success: true, 
-      sources: sources, 
-      subtitles: []
-    };
+    return { success: true, sources: sources, subtitles: [] };
   }
 
-  // 3. OPHIM - Direct URLs, no referer
   processOphim(data) {
     if (!data.streams || !Array.isArray(data.streams)) {
-      return { 
-        success: false, 
-        error: "No streams array in Ophim response"
-      };
+      return { success: false, error: "No streams array in Ophim response" };
     }
 
     return {
@@ -332,13 +260,9 @@ class SourceFetcher {
     };
   }
 
-  // 4. BETA - Direct URL with referer
   processBeta(data) {
     if (!data.url) {
-      return { 
-        success: false, 
-        error: "No URL in Beta response"
-      };
+      return { success: false, error: "No URL in Beta response" };
     }
 
     const subtitles = (data.subtitles || []).map(s => ({
@@ -360,21 +284,14 @@ class SourceFetcher {
     };
   }
 
-  // 5. SIGMA - Direct URL with referer and extra headers
   processSigma(data) {
     if (!data.success || !Array.isArray(data.sources)) {
-      return { 
-        success: false, 
-        error: "Invalid Sigma response"
-      };
+      return { success: false, error: "Invalid Sigma response" };
     }
 
     const hlsSources = data.sources.filter(s => s.type === 'hls' && s.file);
     if (!hlsSources.length) {
-      return { 
-        success: false, 
-        error: "No HLS sources found"
-      };
+      return { success: false, error: "No HLS sources found" };
     }
 
     const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
@@ -400,13 +317,9 @@ class SourceFetcher {
     };
   }
 
-  // 6. GAMA - Direct URL with referer
   processGama(data) {
     if (!data.url) {
-      return { 
-        success: false, 
-        error: "No URL in Gama response"
-      };
+      return { success: false, error: "No URL in Gama response" };
     }
 
     const subtitles = (data.subtitles || []).map(s => ({
@@ -428,13 +341,9 @@ class SourceFetcher {
     };
   }
 
-  // 7. CATFLIX - Direct URLs with dynamic headers from response
   processCatflix(data) {
     if (!data.url || !Array.isArray(data.url)) {
-      return { 
-        success: false, 
-        error: "Invalid Catflix URL format"
-      };
+      return { success: false, error: "Invalid Catflix URL format" };
     }
 
     const serverHeaders = data.headers || {};
@@ -458,20 +367,12 @@ class SourceFetcher {
       default: false
     }));
 
-    return { 
-      success: true, 
-      sources: sources, 
-      subtitles: subtitles
-    };
+    return { success: true, sources: sources, subtitles: subtitles };
   }
 
-  // 8. HEXA - Direct URL with dynamic headers from response
   processHexa(data) {
     if (!data.data?.stream?.playlist) {
-      return { 
-        success: false, 
-        error: "No playlist in Hexa data"
-      };
+      return { success: false, error: "No playlist in Hexa data" };
     }
 
     const stream = data.data.stream;
@@ -499,7 +400,6 @@ class SourceFetcher {
     };
   }
 
-  // 9. DELTA - Direct URL, Hindi filter, no referer
   processDelta(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
     const hindiStream = streams.find(s => 
