@@ -38,28 +38,22 @@ async function decryptCipherResponse(response) {
 
     console.log('Server-side decrypting...');
 
-    // Call decryption endpoint with EXACT headers from browser
+    // Call decryption endpoint WITHOUT compression headers (get plain JSON)
     const decryptRes = await fetch(DECRYPT_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Host': 'new.vidnest.fun',
-        'Connection': 'keep-alive',
-        'Content-Length': Buffer.byteLength(JSON.stringify(requestBody)).toString(),
-        'sec-ch-ua-platform': '"Windows"',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-        'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
         'Content-Type': 'application/json',
-        'sec-ch-ua-mobile': '?0',
-        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
         'Origin': 'https://vidnest.fun',
+        'Referer': 'https://vidnest.fun/',
         'Sec-Fetch-Site': 'same-site',
         'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Dest': 'empty',
-        'Referer': 'https://vidnest.fun/',
-        'Accept-Encoding': 'gzip, deflate, br, zstd',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'Sec-Fetch-Dest': 'empty'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      compress: false // Tell node-fetch not to request compression
     });
 
     if (!decryptRes.ok) {
