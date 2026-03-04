@@ -30,12 +30,16 @@ async function decryptCipherResponse(response) {
     const timestamp = Math.floor(Date.now() / 1000);
     const nonce = generateNonce();
 
-    // Call decryption endpoint
+    // Call decryption endpoint WITH proper origin headers
     const decryptRes = await fetch(DECRYPT_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Origin': 'https://new.vidnest.fun',
+        'Referer': 'https://new.vidnest.fun/',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9'
       },
       body: JSON.stringify({
         data: data.data,
