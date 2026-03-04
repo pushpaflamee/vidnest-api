@@ -4,15 +4,51 @@ const { decryptCipherResponse, CIPHER_KEY_BASE64 } = require('./decrypt');
 const BASE_URL = "https://new.vidnest.fun";
 
 const SERVERS = {
-  lamda: { name: "Lamda", type: "lamda", referer: null },
-  alfa: { name: "Alfa", type: "alfa", referer: "https://primevid.click/" },
-  ophim: { name: "Ophim", type: "ophim", referer: null },
-  beta: { name: "Beta", type: "beta", referer: "https://videostr.net/" },
-  sigma: { name: "Sigma", type: "sigma", referer: "https://flashstream.cc/" },
-  gama: { name: "Gama", type: "gama", referer: "https://videostr.net/" },
-  catflix: { name: "Catflix", type: "catflix", referer: null },
-  hexa: { name: "Hexa", type: "hexa", referer: null },
-  delta: { name: "Delta", type: "delta", referer: null }
+  lamda: {
+    name: "Lamda",
+    type: "lamda",
+    referer: null // No referer needed
+  },
+  alfa: {
+    name: "Alfa",
+    type: "alfa",
+    referer: "https://primevid.click/"
+  },
+  ophim: {
+    name: "Ophim",
+    type: "ophim",
+    referer: null // No referer needed
+  },
+  beta: {
+    name: "Beta",
+    type: "beta",
+    referer: "https://videostr.net/"
+  },
+  sigma: {
+    name: "Sigma",
+    type: "sigma",
+    referer: "https://flashstream.cc/"
+  },
+  gama: {
+    name: "Gama",
+    type: "gama",
+    referer: "https://videostr.net/"
+  },
+  catflix: {
+    name: "Catflix",
+    type: "catflix",
+    referer: null // Headers passed per request
+  },
+  hexa: {
+    name: "Hexa",
+    type: "hexa",
+    referer: null // Dynamic from response
+  },
+  delta: {
+    name: "Delta",
+    type: "delta",
+    referer: null // No referer needed
+  }
 };
 
 class SourceFetcher {
@@ -27,158 +63,478 @@ class SourceFetcher {
   }
 
   async fetch() {
-    if (!this.server) throw new Error(`Unknown server: ${this.serverKey}`);
+    if (!this.server) {
+      throw new Error(`Unknown server: ${this.serverKey}`);
+    }
 
     try {
       const endpoint = this.getEndpoint();
       console.log(`[${this.serverKey}] Fetching: ${endpoint}`);
 
       const response = await fetchWithTimeout(endpoint, {}, this.timeout);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       const rawText = await response.text();
-      console.log(`[${this.serverKey}] Raw response (first 200 chars):`, rawText.substring(0, 200));
-
+      
       let jsonData = null;
       try {
         jsonData = JSON.parse(rawText);
-        console.log(`[${this.serverKey}] JSON keys:`, Object.keys(jsonData));
       } catch (e) {
-        console.log(`[${this.serverKey}] Not JSON, will decrypt raw`);
+        // Not valid JSON
       }
 
       let decrypted = null;
       
-      if (jsonData?.encrypted === true && jsonData.data) {
-        console.log(`[${this.serverKey}] Decrypting...`);
-        decrypted = await decryptCipherResponse(jsonData);
-        console.log(`[${this.serverKey}] Decrypted keys:`, decrypted ? Object.keys(decrypted) : 'null');
+      if (jsonData && jsonData.encrypted === true && jsonData.data) {
+        decrypted = await decryptCipherResponse(jsonData, CIPHER_KEY_BASE64);
+        
+        if (!decrypted) {
+          return {
+            success: false,
+            error: "Decryption failed",
+            rawData: jsonData
+          };
+        }
       } else if (jsonData) {
         decrypted = jsonData;
       } else {
-        decrypted = await decryptCipherResponse(rawText);
+        decrypted = await decryptCipherResponse(rawText, CIPHER_KEY_BASE64);
       }
 
       if (!decrypted) {
-        return { success: false, error: "Decryption failed", raw: rawText.substring(0, 500) };
-      }
-
-      // Handle nested data structures
-      if (decrypted.data && typeof decrypted.data === 'object' && !decrypted.sources) {
-        console.log(`[${this.serverKey}] Unwrapping nested data`);
-        decrypted = decrypted.data;
+        return {
+          success: false,
+          error: "Failed to parse/decrypt response",
+          rawData: { rawText: rawText.substring(0, 1000) }
+        };
       }
 
       return this.processData(decrypted);
 
     } catch (error) {
       console.error(`[${this.serverKey}] Error:`, error.message);
-      return { success: false, error: error.message };
+      throw error;
     }
   }
 
   getEndpoint() {
-    const endpoints = {
-      lamda: `/allmovies/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      alfa: `/primesrc/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      ophim: `/ophim/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      beta: `/flixhq/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}?server=upcloud`,
-      sigma: `/hollymoviehd/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      gama: `/flixhq/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      catflix: `/moviebox/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      hexa: `/vidlink/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`,
-      delta: `/allmovies/${this.type}/${this.tmdbId}${this.type === 'tv' ? `/${this.season}/${this.episode}` : ''}`
-    };
-    return `${BASE_URL}${endpoints[this.serverKey]}`;
+    switch (this.serverKey) {
+      case 'lamda':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/allmovies/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/allmovies/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'alfa':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/primesrc/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/primesrc/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'ophim':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/ophim/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/ophim/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'beta':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/flixhq/movie/${this.tmdbId}?server=upcloud`;
+        } else {
+          return `${BASE_URL}/flixhq/tv/${this.tmdbId}/${this.season}/${this.episode}?server=upcloud`;
+        }
+      
+      case 'sigma':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/hollymoviehd/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/hollymoviehd/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'gama':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/flixhq/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/flixhq/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'catflix':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/moviebox/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/moviebox/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'hexa':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/vidlink/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/vidlink/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      case 'delta':
+        if (this.type === 'movie') {
+          return `${BASE_URL}/allmovies/movie/${this.tmdbId}`;
+        } else {
+          return `${BASE_URL}/allmovies/tv/${this.tmdbId}/${this.season}/${this.episode}`;
+        }
+      
+      default:
+        throw new Error(`Unknown server type: ${this.serverKey}`);
+    }
   }
 
   processData(data) {
-    console.log(`[${this.serverKey}] Processing with keys:`, Object.keys(data));
-    
-    const processors = {
-      lamda: this.processLamda.bind(this),
-      alfa: this.processAlfa.bind(this),
-      ophim: this.processOphim.bind(this),
-      beta: this.processBeta.bind(this),
-      sigma: this.processSigma.bind(this),
-      gama: this.processGama.bind(this),
-      catflix: this.processCatflix.bind(this),
-      hexa: this.processHexa.bind(this),
-      delta: this.processDelta.bind(this)
-    };
+    console.log(`[${this.serverKey}] Processing data with keys:`, Object.keys(data));
 
-    const result = processors[this.serverKey](data);
+    let result;
+    
+    switch (this.serverKey) {
+      case 'lamda':
+        result = this.processLamda(data);
+        break;
+      case 'alfa':
+        result = this.processAlfa(data);
+        break;
+      case 'ophim':
+        result = this.processOphim(data);
+        break;
+      case 'beta':
+        result = this.processBeta(data);
+        break;
+      case 'sigma':
+        result = this.processSigma(data);
+        break;
+      case 'gama':
+        result = this.processGama(data);
+        break;
+      case 'catflix':
+        result = this.processCatflix(data);
+        break;
+      case 'hexa':
+        result = this.processHexa(data);
+        break;
+      case 'delta':
+        result = this.processDelta(data);
+        break;
+      default:
+        result = {
+          success: false,
+          error: "Unknown server processor"
+        };
+    }
+
     result.rawData = data;
     return result;
   }
 
+  // 1. LAMDA - Direct URL, English filter, no referer
   processLamda(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
-    const stream = streams.find(s => (s.language || '').toLowerCase() === 'english') || streams[0];
-    if (!stream?.url) return { success: false, error: "No stream found" };
-    return { success: true, sources: [{ url: stream.url, quality: stream.quality || 'auto', type: 'hls' }], subtitles: [] };
-  }
+    const englishStream = streams.find(s => 
+      (s.language || '').toLowerCase() === 'english'
+    ) || streams[0];
 
-  processAlfa(data) {
-    console.log(`[Alfa] Data:`, JSON.stringify(data).substring(0, 300));
-    
-    // Try multiple possible structures
-    let sources = data.sources || data.data?.sources || (Array.isArray(data) ? data : null) || (data.url ? [{url: data.url, quality: 'auto'}] : null);
-    
-    if (!sources) {
-      return { success: false, error: "No sources found", debug: { keys: Object.keys(data) } };
+    if (!englishStream?.url) {
+      return { 
+        success: false, 
+        error: "No English stream found",
+        availableLanguages: streams.map(s => s.language)
+      };
     }
 
-    const valid = sources.filter(s => s.url && (s.url.includes('.m3u8') || s.url.includes('/hls/') || s.isM3U8));
-    if (!valid.length) return { success: false, error: "No valid sources", debug: { sources } };
-
-    return { 
-      success: true, 
-      sources: valid.map(s => ({ url: s.url, quality: s.quality || 'auto', type: 'hls', referer: this.server.referer })),
-      subtitles: [] 
+    return {
+      success: true,
+      sources: [{
+        url: englishStream.url,
+        quality: englishStream.quality || 'English',
+        type: this.detectStreamType(englishStream.url),
+        referer: this.server.referer
+      }],
+      subtitles: []
     };
   }
 
+  // 2. ALFA - Direct URL with referer
+  processAlfa(data) {
+    if (!data.sources || !Array.isArray(data.sources)) {
+      return { 
+        success: false, 
+        error: "No sources in Alfa response"
+      };
+    }
+
+    const validSources = data.sources.filter(s => {
+      if (!s.url) return false;
+      const isM3U8 = s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/') || s.url.includes('master');
+      return isM3U8 || s.url.includes('.txt');
+    });
+
+    if (!validSources.length) {
+      return { 
+        success: false, 
+        error: "No valid M3U8/HLS sources found"
+      };
+    }
+
+    const sortedSources = validSources.sort((a, b) => {
+      const aTxt = a.url.includes('.txt');
+      const bTxt = b.url.includes('.txt');
+      if (aTxt && !bTxt) return 1;
+      if (!aTxt && bTxt) return -1;
+      
+      const aIp = /\/\/\d+\.\d+\.\d+\.\d+/.test(a.url);
+      const bIp = /\/\/\d+\.\d+\.\d+\.\d+/.test(b.url);
+      if (aIp && !bIp) return 1;
+      if (!aIp && bIp) return -1;
+      
+      return 0;
+    });
+
+    const sources = sortedSources.map(s => ({
+      url: s.url,
+      quality: s.quality || 'auto',
+      type: s.isM3U8 || s.url.includes('.m3u8') || s.url.includes('/hls/') ? 'hls' : 'mp4',
+      referer: this.server.referer
+    }));
+
+    return { 
+      success: true, 
+      sources: sources, 
+      subtitles: []
+    };
+  }
+
+  // 3. OPHIM - Direct URLs, no referer
   processOphim(data) {
-    if (!data.streams?.length) return { success: false, error: "No streams" };
-    return { success: true, sources: data.streams.map(s => ({ url: s.url, quality: s.quality, type: 'hls' })), subtitles: [] };
+    if (!data.streams || !Array.isArray(data.streams)) {
+      return { 
+        success: false, 
+        error: "No streams array in Ophim response"
+      };
+    }
+
+    return {
+      success: true,
+      sources: data.streams.map(s => ({
+        url: s.url,
+        quality: s.quality || 'HD',
+        type: this.detectStreamType(s.url),
+        referer: this.server.referer
+      })),
+      subtitles: []
+    };
   }
 
+  // 4. BETA - Direct URL with referer
   processBeta(data) {
-    if (!data.url) return { success: false, error: "No URL" };
-    return { success: true, sources: [{ url: data.url, quality: 'auto', type: 'hls', referer: this.server.referer }], subtitles: data.subtitles || [] };
+    if (!data.url) {
+      return { 
+        success: false, 
+        error: "No URL in Beta response"
+      };
+    }
+
+    const subtitles = (data.subtitles || []).map(s => ({
+      url: s.url,
+      lang: s.lang || 'en',
+      label: s.label || 'Unknown',
+      default: !!s.default
+    }));
+
+    return {
+      success: true,
+      sources: [{
+        url: data.url,
+        quality: 'auto',
+        type: 'hls',
+        referer: this.server.referer
+      }],
+      subtitles: subtitles
+    };
   }
 
+  // 5. SIGMA - Direct URL with referer and extra headers
   processSigma(data) {
-    const hls = data.sources?.filter(s => s.type === 'hls' && s.file);
-    if (!hls?.length) return { success: false, error: "No HLS" };
-    const selected = hls[Math.min(2, hls.length - 1)];
-    return { success: true, sources: [{ url: selected.file, quality: selected.label, type: 'hls', referer: this.server.referer }], subtitles: [] };
+    if (!data.success || !Array.isArray(data.sources)) {
+      return { 
+        success: false, 
+        error: "Invalid Sigma response"
+      };
+    }
+
+    const hlsSources = data.sources.filter(s => s.type === 'hls' && s.file);
+    if (!hlsSources.length) {
+      return { 
+        success: false, 
+        error: "No HLS sources found"
+      };
+    }
+
+    const selected = hlsSources.length >= 3 ? hlsSources[2] : hlsSources[hlsSources.length - 1];
+
+    return {
+      success: true,
+      sources: [{
+        url: selected.file,
+        quality: selected.label || 'auto',
+        type: 'hls',
+        referer: this.server.referer,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+          "Accept": "*/*",
+          "Accept-Language": "en-US,en;q=0.5",
+          "Sec-Fetch-Dest": "empty",
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Site": "cross-site",
+          "Origin": "https://flashstream.cc"
+        }
+      }],
+      subtitles: []
+    };
   }
 
+  // 6. GAMA - Direct URL with referer
   processGama(data) {
-    if (!data.url) return { success: false, error: "No URL" };
-    return { success: true, sources: [{ url: data.url, quality: 'auto', type: 'hls', referer: this.server.referer }], subtitles: data.subtitles || [] };
+    if (!data.url) {
+      return { 
+        success: false, 
+        error: "No URL in Gama response"
+      };
+    }
+
+    const subtitles = (data.subtitles || []).map(s => ({
+      url: s.url,
+      lang: s.lang || 'en',
+      label: s.label || 'Unknown',
+      default: !!s.default
+    }));
+
+    return {
+      success: true,
+      sources: [{
+        url: data.url,
+        quality: 'auto',
+        type: 'hls',
+        referer: this.server.referer
+      }],
+      subtitles: subtitles
+    };
   }
 
+  // 7. CATFLIX - Direct URLs with dynamic headers from response
   processCatflix(data) {
-    if (!data.url?.length) return { success: false, error: "No URLs" };
-    const sources = data.url.map(u => ({ url: u.link, quality: u.resolution ? `${u.resolution}p` : 'auto', type: u.type || 'mp4' })).sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-    return { success: true, sources, subtitles: (data.tracks || []).map(t => ({ url: t.file, label: t.label })) };
+    if (!data.url || !Array.isArray(data.url)) {
+      return { 
+        success: false, 
+        error: "Invalid Catflix URL format"
+      };
+    }
+
+    const serverHeaders = data.headers || {};
+    
+    const sources = data.url.map(u => ({
+      url: u.link,
+      quality: u.resolution ? (isNaN(Number(u.resolution)) ? u.resolution : `${u.resolution}p`) : 'auto',
+      type: u.type || 'mp4',
+      referer: serverHeaders.Referer || serverHeaders.referer || null,
+      headers: Object.keys(serverHeaders).length > 0 ? serverHeaders : null
+    })).sort((a, b) => {
+      const aq = parseInt(a.quality) || 0;
+      const bq = parseInt(b.quality) || 0;
+      return bq - aq;
+    });
+
+    const subtitles = (data.tracks || []).map(t => ({
+      url: t.file,
+      label: t.label || 'Unknown',
+      lang: t.label || 'en',
+      default: false
+    }));
+
+    return { 
+      success: true, 
+      sources: sources, 
+      subtitles: subtitles
+    };
   }
 
+  // 8. HEXA - Direct URL with dynamic headers from response
   processHexa(data) {
-    const playlist = data.data?.stream?.playlist || data.stream?.playlist;
-    if (!playlist) return { success: false, error: "No playlist" };
-    return { success: true, sources: [{ url: playlist, quality: 'auto', type: 'hls' }], subtitles: [] };
+    if (!data.data?.stream?.playlist) {
+      return { 
+        success: false, 
+        error: "No playlist in Hexa data"
+      };
+    }
+
+    const stream = data.data.stream;
+    const serverHeaders = data.headers || {};
+    
+    const subtitles = (stream.captions || [])
+      .filter(c => c.url && (c.type === 'vtt' || c.type === 'srt'))
+      .map(c => ({
+        label: c.language || 'Unknown',
+        lang: (c.language || 'en').toLowerCase(),
+        url: c.url,
+        default: false
+      }));
+
+    return {
+      success: true,
+      sources: [{
+        url: stream.playlist,
+        quality: 'auto',
+        type: 'hls',
+        referer: serverHeaders.Referer || serverHeaders.referer || null,
+        headers: Object.keys(serverHeaders).length > 0 ? serverHeaders : null
+      }],
+      subtitles: subtitles
+    };
   }
 
+  // 9. DELTA - Direct URL, Hindi filter, no referer
   processDelta(data) {
     const streams = Array.isArray(data.streams) ? data.streams : [];
-    const hindi = streams.find(s => (s.language || '').toLowerCase() === 'hindi');
-    if (!hindi?.url) return { success: false, error: "No Hindi stream" };
-    return { success: true, sources: [{ url: hindi.url, quality: 'Hindi', type: 'hls' }], subtitles: [] };
+    const hindiStream = streams.find(s => 
+      (s.language || '').toLowerCase() === 'hindi'
+    );
+
+    if (!hindiStream?.url) {
+      return { 
+        success: false, 
+        error: "Hindi stream not available",
+        availableLanguages: streams.map(s => s.language)
+      };
+    }
+
+    return {
+      success: true,
+      sources: [{
+        url: hindiStream.url,
+        quality: 'Hindi',
+        type: this.detectStreamType(hindiStream.url),
+        referer: this.server.referer
+      }],
+      subtitles: []
+    };
+  }
+
+  detectStreamType(url) {
+    if (!url) return 'mp4';
+    if (url.includes('.m3u8') || url.includes('/hls/')) return 'hls';
+    if (url.includes('.mp4')) return 'mp4';
+    return 'mp4';
   }
 }
 
-module.exports = { SERVERS, SourceFetcher };
+module.exports = {
+  SERVERS,
+  SourceFetcher
+};
