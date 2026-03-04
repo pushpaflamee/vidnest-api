@@ -1,33 +1,24 @@
-const crypto = require('crypto').webcrypto;
-
-async function decryptCipherResponse(response) {
-  try {
-    let data = typeof response === 'string' ? JSON.parse(response) : response;
-    
-    if (!data.encrypted) return data;
-    if (!data.data) return null;
-
-    console.log('Server-side decrypting...');
-    return await serverSideDecrypt(data.data);
-    
-  } catch (error) {
-    console.error('Decrypt error:', error.message);
-    return null;
-  }
-}
-
 async function serverSideDecrypt(encryptedData) {
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     const randomBytes = crypto.getRandomValues(new Uint8Array(16));
     const nonce = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
 
+    // Try to mimic a real browser request as closely as possible
     const response = await fetch('https://new.vidnest.fun/decrypt', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Origin': 'https://new.vidnest.fun',
-        'Referer': 'https://new.vidnest.fun/'
+        'Referer': 'https://new.vidnest.fun/',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
       },
       body: JSON.stringify({ data: encryptedData, timestamp, nonce })
     });
@@ -38,16 +29,12 @@ async function serverSideDecrypt(encryptedData) {
     }
 
     const result = await response.json();
-    console.log('Decrypt API result keys:', Object.keys(result));
     
-    // Handle different response structures
     if (result.data) {
       try {
-        // Try to parse if it's a JSON string
         return JSON.parse(result.data);
       } catch (e) {
-        // Return as-is if not JSON
-        return { data: result.data, decrypted: true };
+        return { data: result.data };
       }
     }
     
@@ -58,5 +45,3 @@ async function serverSideDecrypt(encryptedData) {
     return null;
   }
 }
-
-module.exports = { decryptCipherResponse };
